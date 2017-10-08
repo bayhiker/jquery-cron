@@ -40,6 +40,7 @@
 (function($) {
 
     var defaults = {
+        languageUrl: undefined,
         initial : "* * * * *",
         minuteOpts : {
             minWidth  : 100, // only applies if columns and itemWidth not set
@@ -93,79 +94,186 @@
         url_set : undefined,
         customValues : undefined,
         onChange: undefined, // callback function each time value changes
+        useBootstrapMultiSelect: false,
         useGentleSelect: false
     };
 
-    // -------  build some static data -------
-
+    // -------  Define plugin-wide variables -------
+    // Dictionary of localizable strings and localized values
+    var i18nMap = {};
     // options for minutes in an hour
     var str_opt_mih = "";
-    for (var i = 0; i < 60; i++) {
-        var j = (i < 10)? "0":"";
-        str_opt_mih += "<option value='"+i+"'>" + j +  i + "</option>\n";
-    }
-
     // options for hours in a day
     var str_opt_hid = "";
-    for (var i = 0; i < 24; i++) {
-        var j = (i < 10)? "0":"";
-        str_opt_hid += "<option value='"+i+"'>" + j + i + "</option>\n";
-    }
-
     // options for days of month
     var str_opt_dom = "";
-    for (var i = 1; i < 32; i++) {
-        if (i == 1 || i == 21 || i == 31) { var suffix = "st"; }
-        else if (i == 2 || i == 22) { var suffix = "nd"; }
-        else if (i == 3 || i == 23) { var suffix = "rd"; }
-        else { var suffix = "th"; }
-        str_opt_dom += "<option value='"+i+"'>" + i + suffix + "</option>\n";
-    }
-
     // options for months
     var str_opt_month = "";
+    // options for day of week
+    var str_opt_dow = "";
+    // options for period
+    var str_opt_period = "";
+    // display matrix
+    var toDisplay = {};
+    var combinations = {};
     var months = ["January", "February", "March", "April",
                   "May", "June", "July", "August",
                   "September", "October", "November", "December"];
-    for (var i = 0; i < months.length; i++) {
-        str_opt_month += "<option value='"+(i+1)+"'>" + months[i] + "</option>\n";
-    }
-
-    // options for day of week
-    var str_opt_dow = "";
     var days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday",
                 "Friday", "Saturday"];
-    for (var i = 0; i < days.length; i++) {
-        str_opt_dow += "<option value='"+i+"'>" + days[i] + "</option>\n";
-    }
 
-    // options for period
-    var str_opt_period = "";
-    var periods = ["minute", "hour", "day", "week", "month", "year"];
-    for (var i = 0; i < periods.length; i++) {
-        str_opt_period += "<option value='"+periods[i]+"'>" + periods[i] + "</option>\n";
-    }
-
-    // display matrix
-    var toDisplay = {
-        "minute" : [],
-        "hour"   : ["mins"],
-        "day"    : ["time"],
-        "week"   : ["dow", "time"],
-        "month"  : ["dom", "time"],
-        "year"   : ["dom", "month", "time"]
-    };
-
-    var combinations = {
-        "minute" : /^(\*\s){4}\*$/,                    // "* * * * *"
-        "hour"   : /^\d{1,2}\s(\*\s){3}\*$/,           // "? * * * *"
-        "day"    : /^(\d{1,2}\s){2}(\*\s){2}\*$/,      // "? ? * * *"
-        "week"   : /^(\d{1,2}\s){2}(\*\s){2}\d{1,2}$/, // "? ? * * ?"
-        "month"  : /^(\d{1,2}\s){3}\*\s\*$/,           // "? ? ? * *"
-        "year"   : /^(\d{1,2}\s){4}\*$/                // "? ? ? ? *"
-    };
 
     // ------------------ internal functions ---------------
+    function initializeI18nMap(languageUrl) {
+        // Defaults to English in case no language pack is available at all
+        var i18nMapDefaults = {
+                // Months
+                "January": "January",
+                "February": "February",
+                "March": "March",
+                "April": "April",
+                "May": "May",
+                "June": "June",
+                "July": "July",
+                "August": "August",
+                "September": "September",
+                "October": "October",
+                "November": "November",
+                "December": "December",
+                // Day of the week
+                "Sunday": "Sunday",
+                "Monday": "Monday",
+                "Tuesday": "Tuesday",
+                "Wednesday": "Wednesday",
+                "Thursday": "Thursday",
+                "Friday": "Friday",
+                "Saturday": "Saturday",
+                // Periods
+                "minute": "minute",
+                "hour": "hour",
+                "day": "day",
+                "week": "week",
+                "month": "month",
+                "year": "year",
+                // Miscellaneous
+                "At": "at",
+                "OnThe": "on the",
+                "SuffixSt": "st",
+                "SuffixNd": "nd",
+                "SuffixRd": "rd",
+                "SuffixTh": "th",
+                "Every": "Every",
+                // readable description
+                "EveryMinute": "Every minute",
+                "HourDesc": "{minute} minutes past every hour",
+                "DayDesc": "Every day at {hour}:{minute}",
+                "WeekDesc": "Every {dow} at {hour}:{minute}",
+                "MonthDesc": "On {dom} of every month at {hour}:{minute}",
+                "YearDesc": "On {dom} of every {month} at {hour}:{minute}",
+        };
+        if (! languageUrl) {
+            i18nMap = i18nMapDefaults;
+            return;
+        }
+        i18nMap = getI18nLookupTable(languageUrl);
+        if (! i18nMap) {
+            i18nMap = i18nMapDefaults;
+        }
+    }
+    
+    function getI18nLookupTable(languageUrl) {
+        var jsonFileContent = $.ajax({
+                type: "GET",
+                url: languageUrl,
+                async: false
+            }).responseText;
+        if (jsonFileContent) {
+            return $.parseJSON(jsonFileContent);
+        } else {
+            return undefined;
+        }
+    }
+    
+    function getFormattedHourOrMinute(i) {
+        if (i<10) {
+            return "0" + i;
+        } else {
+            return i;
+        }
+    }
+    
+    function getDaySuffix(dayOfMonth) {
+        var suffix = "";
+        if (dayOfMonth == 1 || dayOfMonth == 21 || dayOfMonth == 31) {
+            suffix = i18nMap['SuffixSt'];
+        } else if (dayOfMonth == 2 || dayOfMonth == 22) {
+            suffix = i18nMap['SuffixNd'];
+        } else if (dayOfMonth == 3 || dayOfMonth == 23) {
+            suffix = i18nMap['SuffixRd'];
+        } else {
+            suffix = i18nMap['SuffixTh'];
+        }
+        return suffix; 
+    }
+
+    function initializeGlobalVariables() {
+        for (var i = 0; i < 60; i++) {
+            str_opt_mih += "<option value='"+i+"'>" + getFormattedHourOrMinute(i) + "</option>\n";
+        }
+    
+        for (var i = 0; i < 24; i++) {
+            str_opt_hid += "<option value='"+i+"'>" + getFormattedHourOrMinute(i) + "</option>\n";
+        }
+    
+        for (var i = 1; i < 32; i++) {
+            var suffix = getDaySuffix(i);
+            str_opt_dom += "<option value='"+i+"'>" + i + suffix + "</option>\n";
+        }
+
+        for (var i = 0; i < months.length; i++) {
+            str_opt_month += "<option value='"+(i+1)+"'>" + i18nMap[months[i]] + "</option>\n";
+        }
+
+        for (var i = 0; i < days.length; i++) {
+            str_opt_dow += "<option value='"+i+"'>" + i18nMap[days[i]] + "</option>\n";
+        }
+
+        var periods = ["minute", "hour", "day", "week", "month", "year"];
+        for (var i = 0; i < periods.length; i++) {
+            str_opt_period += "<option value='"+periods[i]+"'>" + i18nMap[periods[i]] + "</option>\n";
+        }
+
+        // display matrix
+       toDisplay = {
+           "minute" : [],
+           "hour"   : ["mins"],
+           "day"    : ["time"],
+           "week"   : ["dow", "time"],
+           "month"  : ["dom", "time"],
+           "year"   : ["dom", "month", "time"]
+       };
+
+       combinations = {
+           "minute" : /^(\*\s){4}\*$/,                    // "* * * * *"
+           "hour"   : /^\d{1,2}\s(\*\s){3}\*$/,           // "? * * * *"
+           "day"    : /^(\d{1,2}\s){2}(\*\s){2}\*$/,      // "? ? * * *"
+           "week"   : /^(\d{1,2}\s){2}(\*\s){2}\d{1,2}$/, // "? ? * * ?"
+           "month"  : /^(\d{1,2}\s){3}\*\s\*$/,           // "? ? ? * *"
+           "year"   : /^(\d{1,2}\s){4}\*$/                // "? ? ? ? *"
+       };
+    }
+    
+    function getLocalizedString(s, replacements) {
+        if (! defined(replacements)) {
+            return s;
+        }
+        $.each(replacements, function(key, value){
+            // Note that this only replaces the first occurrance, however, good enough for cron strings
+            s = s.replace("{" + key + "}", value);
+        });
+        return s;
+    }
+
     function defined(obj) {
         if (typeof obj == "undefined") { return false; }
         else { return true; }
@@ -292,6 +400,12 @@
                 timeHourOpts   : $.extend({}, defaults.timeHourOpts, eo, options.timeHourOpts),
                 timeMinuteOpts : $.extend({}, defaults.timeMinuteOpts, eo, options.timeMinuteOpts)
             });
+            // convert to cron string in case a quartz string was passed in
+            o.initial = methods["toCronString"].call(this, o.initial); // set initial value
+            
+            // initialize global variables for this plugin
+            initializeI18nMap(o.languageUrl);
+            initializeGlobalVariables();
 
             // error checking
             if (hasError(this, o)) { return this; }
@@ -306,7 +420,7 @@
             }
 
             block["period"] = $("<span class='cron-period'>"
-                    + "Every <select name='cron-period'>" + custom_periods
+                    + i18nMap['Every'] + " <select name='cron-period'>" + custom_periods
                     + str_opt_period + "</select> </span>")
                 .appendTo(this)
                 .data("root", this);
@@ -317,7 +431,7 @@
             if (o.useGentleSelect) select.gentleSelect(eo);
 
             block["dom"] = $("<span class='cron-block cron-block-dom'>"
-                    + " on the <select name='cron-dom'>" + str_opt_dom
+                    + " " + i18nMap['OnThe'] + " <select name='cron-dom'>" + str_opt_dom
                     + "</select> </span>")
                 .appendTo(this)
                 .data("root", this);
@@ -326,7 +440,7 @@
             if (o.useGentleSelect) select.gentleSelect(o.domOpts);
 
             block["month"] = $("<span class='cron-block cron-block-month'>"
-                    + " of <select name='cron-month'>" + str_opt_month
+                    + " " + i18nMap['Of'] + " <select name='cron-month'>" + str_opt_month
                     + "</select> </span>")
                 .appendTo(this)
                 .data("root", this);
@@ -335,8 +449,8 @@
             if (o.useGentleSelect) select.gentleSelect(o.monthOpts);
 
             block["mins"] = $("<span class='cron-block cron-block-mins'>"
-                    + " at <select name='cron-mins'>" + str_opt_mih
-                    + "</select> minutes past the hour </span>")
+                    + " " + i18nMap['At'] + " <select name='cron-mins'>" + str_opt_mih
+                    + "</select> " + i18nMap['MinutesPastTheHour'] + " </span>")
                 .appendTo(this)
                 .data("root", this);
 
@@ -344,7 +458,7 @@
             if (o.useGentleSelect) select.gentleSelect(o.minuteOpts);
 
             block["dow"] = $("<span class='cron-block cron-block-dow'>"
-                    + " on <select name='cron-dow'>" + str_opt_dow
+                    + " " + i18nMap['On'] + " <select name='cron-dow'>" + str_opt_dow
                     + "</select> </span>")
                 .appendTo(this)
                 .data("root", this);
@@ -353,7 +467,7 @@
             if (o.useGentleSelect) select.gentleSelect(o.dowOpts);
 
             block["time"] = $("<span class='cron-block cron-block-time'>"
-                    + " at <select name='cron-time-hour' class='cron-time-hour'>" + str_opt_hid
+                    + " " + i18nMap['At'] + " <select name='cron-time-hour' class='cron-time-hour'>" + str_opt_hid
                     + "</select>:<select name='cron-time-min' class='cron-time-min'>" + str_opt_mih
                     + " </span>")
                 .appendTo(this)
@@ -380,14 +494,113 @@
 
             return methods["value"].call(this, o.initial); // set initial value
         },
+        
+        toCronString: function(cronOrQuartz) {
+            if (! defined(cronOrQuartz)) {
+                return cronOrQuartz;
+            }
+            var parts = cronOrQuartz.split(" ");
+            var numParts = parts.length;
+            if (numParts.length < 5 || numParts > 6) {
+                // For quartz, it's possible to have length 7 with last optional year field
+                // not supported by this front end yet
+                return cronOrQuartz; 
+            }
+            var minute = parts[numParts - 5];
+            var hour = parts[numParts - 4];
+            var dayOfMonth = parts[numParts - 3];
+            var month = parts[numParts - 2];
+            var dayOfWeek = parts[numParts - 1];
+            if (numParts == 6) {
+                // this is a quartz string, replace questions marks with stars
+                if (isNaN(dayOfWeek)) {
+                    if (dayOfWeek == "?") {
+                        dayOfWeek = "*";
+                    }
+                } else {
+                    // DoW is 0-6 in cron, but 1-7 in quartz
+                    dayOfWeek = dayOfWeek - 1;
+                }
+                if (dayOfMonth == "?") {
+                    dayOfMonth = "*";
+                }
+                if (month == "?") {
+                    month = "*";
+                }
+            }
+            var cronString = minute + " " + hour + " " + dayOfMonth + " " + month + " " + dayOfWeek;
+            return cronString;
+        },
+
+        /**
+         * Limit support consistent with front-end support as stated earlier in this module.
+         * For all others, the original string will be returned
+         * - Every minute : * * * * *
+         * - Every hour   : ? * * * *
+         * - Every day    : ? ? * * *
+         * - Every week   : ? ? * * ?
+         * - Every month  : ? ? ? * *
+         * - Every year   : ? ? ? ? *
+         */
+        readableDescription : function(cronOrQuartz) {
+            var cronString = methods["toCronString"].call(this, cronOrQuartz); // set initial value
+
+            var cronType = getCronType(cronString, this.data('options'));
+            if (! defined(cronType)) {
+                return cronOrQuartz;
+            }
+            var parts = cronString.split(" ");
+            var minute = parts[0], hour = parts[1], dayOfMonth = parts[2],
+                month = parts[3], dayOfWeek = parts[4];
+            if (cronType == "minute") {
+                //"minute" : /^(\*\s){4}\*$/,                    // "* * * * *"
+                return i18nMap["EveryMinute"];
+            } else if (cronType == "hour") {
+                //"hour"   : /^\d{1,2}\s(\*\s){3}\*$/,           // "? * * * *"
+                return getLocalizedString(i18nMap["HourDesc"], {"minute": minute})
+            } else if (cronType == "day") {
+                //"day"    : /^(\d{1,2}\s){2}(\*\s){2}\*$/,      // "? ? * * *"
+                return getLocalizedString(i18nMap["DayDesc"], {
+                    "minute": getFormattedHourOrMinute(minute),
+                    "hour": getFormattedHourOrMinute(hour)
+                })
+            } else if (cronType == "week") {
+                //"week"   : /^(\d{1,2}\s){2}(\*\s){2}\d{1,2}$/, // "? ? * * ?"
+                return getLocalizedString(i18nMap["WeekDesc"], {
+                    "minute": getFormattedHourOrMinute(minute),
+                    "hour": getFormattedHourOrMinute(hour),
+                    "dow": i18nMap[days[dayOfWeek]]
+                })
+            } else if (cronType == "month") {
+                //"month"  : /^(\d{1,2}\s){3}\*\s\*$/,           // "? ? ? * *"
+                return getLocalizedString(i18nMap["MonthDesc"], {
+                    "minute": getFormattedHourOrMinute(minute),
+                    "hour": getFormattedHourOrMinute(hour),
+                    "dom": dayOfMonth + getDaySuffix(dayOfMonth)
+                })
+            } else if (cronType == "year") {
+                //"year"   : /^(\d{1,2}\s){4}\*$/                // "? ? ? ? *"
+                return getLocalizedString(i18nMap["YearDesc"], {
+                    "minute": getFormattedHourOrMinute(minute),
+                    "hour": getFormattedHourOrMinute(hour),
+                    "dom": dayOfMonth + getDaySuffix(dayOfMonth),
+                    "month": i18nMap[months[month]]
+                })
+            } else {
+                return cronOrQuartz;
+            }
+        },
 
         value : function(cron_str) {
             // when no args, act as getter
             if (!cron_str) { return getCurrentValue(this); }
+            
+            cron_str = methods["toCronString"].call(this, cron_str); // set initial value
 
             var o = this.data('options');
             var block = this.data("block");
             var useGentleSelect = o.useGentleSelect;
+            var useBootstrapMultiSelect = o.useBootstrapMultiSelect;
             var t = getCronType(cron_str, o);
             
             if (!defined(t)) { return false; }
@@ -409,26 +622,35 @@
                 for (var i = 0; i < targets.length; i++) {
                     var tgt = targets[i];
                     if (tgt == "time") {
-                        var btgt = block[tgt].find("select.cron-time-hour").val(v["hour"]);
-                        if (useGentleSelect) btgt.gentleSelect("update");
-
-                        btgt = block[tgt].find("select.cron-time-min").val(v["mins"]);
-                        if (useGentleSelect) btgt.gentleSelect("update");
+                        changeSelectedValue(tgt, "select.cron-time-hour", v["hour"]);
+                        changeSelectedValue(tgt, "select.cron-time-min", v["mins"]);
                     } else {;
-                        var btgt = block[tgt].find("select").val(v[tgt]);
-                        if (useGentleSelect) btgt.gentleSelect("update");
+                        changeSelectedValue(tgt, "select", v[tgt]);
                     }
                 }
             }
             
             // trigger change event
-            var bp = block["period"].find("select").val(t);
-            if (useGentleSelect) bp.gentleSelect("update");
+            var bp = changeSelectedValue("period", "select", t);
             bp.trigger("change");
 
             return this;
-        }
 
+            // private util functions for cron("value") function
+            function changeSelectedValue(target, selectFilter, newValue) {
+                var selectField = block[target].find(selectFilter);
+                if (useBootstrapMultiSelect) {
+                    selectField.multiselect("select", newValue);
+                    //Call rebuild, otherwise there will be two selected radio boxes somehow
+                    selectField.multiselect("rebuild");
+                } else {
+                    selectField.val(newValue);
+                    if (useGentleSelect) selectField.gentleSelect("update");
+                }
+                return selectField;
+            }
+        }
+        
     };
 
     var event_handlers = {
